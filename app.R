@@ -427,26 +427,26 @@ basemap = leaflet(plot_map) %>%
             title = "<small>Deaths per mill</small>") 
 
 labels <- sprintf(
-  "<strong>%s</strong><br/>Average age: %g years, Count: %g",
+  "<strong>%s</strong><br/>Average age: %g years,<br/> Count: %g",
   mm_polis$NAME, mm_polis$age, mm_polis$Count
 ) %>% lapply(htmltools::HTML)
 
 polismap = 
 leaflet(mm_polis) %>%
   addProviderTiles("CartoDB.Positron") %>%
-  addPolygons(stroke=FALSE,
+  addPolygons(stroke=TRUE,
               smoothFactor = 0.2,
               fillOpacity = .7,
               popup = agepopup,
               fillColor = ~agePalette(mm_polis$age),
               color = "white",
-              dashArray = "3",
+              dashArray = "1",
               group = "Age",
+              weight = 1,
               highlight = highlightOptions(
-                weight = 5,
+                weight = 2,
                 color = "#666",
                 dashArray = "",
-                fillOpacity = 0.7,
                 bringToFront = TRUE),
               label = labels,
               labelOptions = labelOptions(
@@ -577,10 +577,10 @@ ui <- bootstrapPage(
                                         
                           ),
                           absolutePanel(id = "controls", class = "panel panel-default",
-                                        top = 75, left = 55, width = 250, fixed=TRUE,
-                                        draggable = TRUE, height = "auto",
+                                        bottom = 20, right = 50, width = 300, fixed=TRUE,
+                                        draggable = FALSE, height = "auto",
                             sliderInput("polis_date_range",
-                                        "Year Range:",
+                                        "Diagnosis Year Range: (coming soon)",
                                         min = as.numeric(min(mm_polis$minYearDiag)),
                                         max = as.numeric(max(mm_polis$maxYearDiag)),
                                         value=(c(min(mm_polis$minYearDiag), as.numeric(max(mm_polis$maxYearDiag)))),
