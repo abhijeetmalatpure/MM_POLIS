@@ -100,23 +100,25 @@ if(!file.exists(data_mm_polis)) {
 mm_polis_raw <- as.data.frame(read.csv(data_mm_polis, header = TRUE, sep = ",")) %>% dplyr::rename('fips' = 'County.FIPS.at.Diagnosis')
 
 mm_polis <- mm_polis_raw %>% group_by(fips) %>% summarise(age = round(mean(Age.at.Dignosis), 1), 
-                                                          Count = n(),
+                                                          total_count = n(),
                                                           minYearDiag = min(YearOfDiagnosis),
-                                                          maxYearDiag = max(YearOfDiagnosis))
+                                                          maxYearDiag = max(YearOfDiagnosis),
+                                                          death_count = sum(Vital.Status==0),
+                                                          death_rate = sum(Vital.Status==0)/total_count)
 
 mm_polis <- st_as_sf(mm_polis %>% left_join(counties))
 mm_polis <- sf::st_transform(mm_polis, "+proj=longlat +datum=WGS84")
 
 # create popups
 #yodpopup <- paste0("County: ", mm_polis$NAME, ", Avg Year of diagnosis = ", mm_polis$YearOfDiagnosis)
-agepopup <- paste0("County: ", mm_polis$NAME, ", Avg Age = ", mm_polis$age)
+#agepopup <- paste0("County: ", mm_polis$NAME, ", Avg Age = ", mm_polis$age)
 #diagpopup <- paste0("County: ", mm_polis$NAME, ", Avg Diagnostic confirmation = ", mm_polis$Diagnostic.confirmation)
 #chempopup <- paste0("County: ", mm_polis$NAME, ", Avg chemotherapy = ", mm_polis$Chemotherapy)
 
 # create color palettes
 #yodPalette <- colorNumeric(palette = "Oranges", domain=mm_polis$YearOfDiagnosis)
 agePalette <- colorNumeric(palette = "Reds", domain=mm_polis$age)
-#diagPalette <- colorNumeric(palette = "Blues", domain=mm_polis$Diagnostic.confirmation)
+drPalette <- colorNumeric(palette = "Blues", domain=mm_polis$death_rate)
 #chemPalette <- colorNumeric(palette = "Purples", domain=mm_polis$Chemotherapy)
 # 
 # 
@@ -427,17 +429,21 @@ basemap = leaflet(plot_map) %>%
             title = "<small>Deaths per mill</small>") 
 
 labels <- sprintf(
-  "<strong>%s</strong><br/>Average age: %g years,<br/> Count: %g",
-  mm_polis$NAME, mm_polis$age, mm_polis$Count
+  "<strong>%s</strong><br/>Average age: %g years,<br/> # of subjects: %g",
+  mm_polis$NAME, mm_polis$age, mm_polis$total_count
 ) %>% lapply(htmltools::HTML)
 
-polismap = 
+labels_death <- sprintf(
+  "<strong>%s</strong><br/>Death rate: %g,<br/> # of deaths: %g,<br/> # of subjects: %g",
+  mm_polis$NAME, mm_polis$death_rate, mm_polis$death_count, mm_polis$total_count
+) %>% lapply(htmltools::HTML)
+
+polismap =
 leaflet(mm_polis) %>%
   addProviderTiles("CartoDB.Positron") %>%
   addPolygons(stroke=TRUE,
               smoothFactor = 0.2,
               fillOpacity = .7,
-              popup = agepopup,
               fillColor = ~agePalette(mm_polis$age),
               color = "white",
               dashArray = "1",
@@ -453,7 +459,35 @@ leaflet(mm_polis) %>%
                 style = list("font-weight" = "normal", padding = "3px 8px"),
                 textsize = "15px",
                 direction = "auto")
-  ) #%>%
+  ) %>%
+  addPolygons(stroke=TRUE,
+              smoothFactor = 0.2,
+              fillOpacity = .7,
+              fillColor = ~drPalette(mm_polis$death_rate),
+              color = "white",
+              dashArray = "1",
+              group = "Death Rate",
+              weight = 1,
+              highlight = highlightOptions(
+                weight = 2,
+                color = "#666",
+                dashArray = "",
+                bringToFront = TRUE),
+              label = labels_death,
+              labelOptions = labelOptions(
+                style = list("font-weight" = "normal", padding = "3px 8px"),
+                textsize = "15px",
+                direction = "auto")
+  ) %>%
+    addLayersControl(
+      baseGroups = c("Age", "Death Rate"),
+      position = "bottomright",
+      options = layersControlOptions(collapsed = FALSE)
+    ) %>%
+  addLegend("bottomright", pal = agePalette, values = ~mm_polis$age, group = "Age",
+            title = "<small>Average Age<br/> of Subject</small>") %>%
+  addLegend("bottomright", pal = drPalette, values = ~mm_polis$death_rate, group = "Death Rate",
+          title = "<small>Death Rate</small>")
 
   # addPolygons(stroke=FALSE,
   #             smoothFactor = 0.2,
@@ -559,27 +593,14 @@ ui <- bootstrapPage(
              #          )
              # ),
              
-             tabPanel("Polis Data",
+             tabPanel("County-level Maps",
                       div(class="outer",
                           tags$head(includeCSS("styles.css")),
                           leafletOutput("polis", width="100%", height="100%"),
-                          
                           absolutePanel(id = "controls", class = "panel panel-default",
-                                        top = 75, left = 55, width = 250, fixed=TRUE,
-                                        draggable = TRUE, height = "auto",
-                                        
-                                        # sliderTextInput("plot_date",
-                                        #                 label = h5("Select mapping date"),
-                                        #                 choices = format(unique(mm_polis$Age.at.Dignosis), "%d %b %y"),
-                                        #                 selected = format(current_date, "%d %b %y"),
-                                        #                 grid = FALSE,
-                                        #                 animate=animationOptions(interval = 3000, loop = FALSE))
-                                        
-                          ),
-                          absolutePanel(id = "controls", class = "panel panel-default",
-                                        bottom = 20, right = 50, width = 300, fixed=TRUE,
-                                        draggable = FALSE, height = "auto",
-                            sliderInput("polis_date_range",
+                                        bottom = 20, left = 20, width = 250, fixed=TRUE,
+                                        position = "bottomleft", draggable = FALSE, height = "auto",
+                            sliderInput("year_range",
                                         "Diagnosis Year Range: (coming soon)",
                                         min = as.numeric(min(mm_polis$minYearDiag)),
                                         max = as.numeric(max(mm_polis$maxYearDiag)),
@@ -587,6 +608,7 @@ ui <- bootstrapPage(
                                         step = 1,
                             )
                           ),
+                          #verbatimTextOutput("county_table"),
                           absolutePanel(id = "logo", class = "card", bottom = 20, left = 60, fixed=TRUE, draggable = FALSE, height = "auto",
                                         tags$a(href='https://www.iu.edu', tags$img(src='IU.H_WEB.png',height="10%",width="10%"))),
                           
@@ -684,6 +706,22 @@ server = function(input, output, session) {
     cv_cases %>% filter(date == formatted_date())
   })
   
+  mm_polis_reactive_db = reactive({
+    mm_polis <- mm_polis_raw %>% 
+      filter(between(YearOfDiagnosis, input$year_range[1], input$year_range[2])) %>% 
+      group_by(fips) %>% 
+      summarise(age = round(mean(Age.at.Dignosis), 1), 
+                total_count = n(),
+                minYearDiag = min(YearOfDiagnosis),
+                maxYearDiag = max(YearOfDiagnosis),
+                death_count = sum(Vital.Status==0),
+                death_rate = sum(Vital.Status==0)/total_count)
+    
+    mm_polis <- st_as_sf(mm_polis %>% left_join(counties))
+    mm_polis <- sf::st_transform(mm_polis, "+proj=longlat +datum=WGS84")
+    mm_polis
+    })
+  
   reactive_db_last7d = reactive({
     cv_cases %>% filter(date == formatted_date() & new_cases>0)
   })
@@ -755,6 +793,62 @@ server = function(input, output, session) {
                        labelOptions = labelOptions(
                          style = list("font-weight" = "normal", padding = "3px 8px", "color" = covid_col),
                          textsize = "15px", direction = "auto"))
+  })
+  
+  observeEvent(input$year_range, {
+    filtered_mm_polis = mm_polis_reactive_db()
+    labels <- sprintf("<strong>%s</strong><br/>Average age: %g years,<br/> Count: %g",
+                      filtered_mm_polis$NAME, filtered_mm_polis$age, filtered_mm_polis$total_count) %>% lapply(htmltools::HTML)
+    labels_death <- sprintf(
+      "<strong>%s</strong><br/>Death rate: %g,<br/> # of deaths: %g,<br/> # of subjects: %g", 
+      filtered_mm_polis$NAME, filtered_mm_polis$death_rate, filtered_mm_polis$death_count, filtered_mm_polis$total_count
+    ) %>% lapply(htmltools::HTML)
+    
+    leafletProxy("polis", data = filtered_mm_polis) %>%
+      clearMarkers() %>%
+      clearShapes() %>%
+      clearTiles() %>% 
+      addProviderTiles("CartoDB.Positron") %>%
+      addPolygons(stroke=TRUE,
+                  smoothFactor = 0.2,
+                  fillOpacity = .7,
+                  popup = agepopup,
+                  fillColor = ~agePalette(filtered_mm_polis$age),
+                  color = "white",
+                  dashArray = "1",
+                  group = "Age",
+                  weight = 1,
+                  highlight = highlightOptions(
+                    weight = 2,
+                    color = "#666",
+                    dashArray = "",
+                    bringToFront = TRUE),
+                  label = labels,
+                  labelOptions = labelOptions(
+                    style = list("font-weight" = "normal", padding = "3px 8px"),
+                    textsize = "15px",
+                    direction = "auto")
+      ) %>%
+      addPolygons(stroke=TRUE,
+                  smoothFactor = 0.2,
+                  fillOpacity = .7,
+                  popup = agepopup,
+                  fillColor = ~drPalette(filtered_mm_polis$death_rate),
+                  color = "white",
+                  dashArray = "1",
+                  group = "Death Rate",
+                  weight = 1,
+                  highlight = highlightOptions(
+                    weight = 2,
+                    color = "#666",
+                    dashArray = "",
+                    bringToFront = TRUE),
+                  label = labels_death,
+                  labelOptions = labelOptions(
+                    style = list("font-weight" = "normal", padding = "3px 8px"),
+                    textsize = "15px",
+                    direction = "auto")
+      )
   })
   
   output$cumulative_plot <- renderPlot({
@@ -883,6 +977,12 @@ server = function(input, output, session) {
     print(head(mm_polis_raw[,colSums(is.na(mm_polis_raw))<nrow(mm_polis_raw)], input$maxrows), row.names = FALSE)
     options(orig)
   })
+  
+  # output$county_table <- renderPrint({
+  #   orig <- options(width = 500)
+  #   print(head(mm_polis, input$maxrows), row.names = FALSE)
+  #   options(orig)
+  # })
   
   }
 
