@@ -104,11 +104,12 @@ polis_county_summary <- mm_polis_raw %>% group_by(fips) %>% summarise(age = roun
                                                           minYearDiag = min(YearOfDiagnosis),
                                                           maxYearDiag = max(YearOfDiagnosis),
                                                           death_count = sum(Vital.Status==0),
-                                                          death_rate = sum(Vital.Status==0)/total_count)
+                                                          death_rate = sum(Vital.Status==0)/total_count, .groups = 'keep')
 
-polis_county_summary <- st_as_sf(polis_county_summary %>% left_join(counties))
+polis_county_summary <- st_as_sf(polis_county_summary %>% left_join(counties, by = 'fips'))
 polis_county_summary <- sf::st_transform(polis_county_summary, "+proj=longlat +datum=WGS84")
 
+polis_age <- mm_polis_raw %>% select(c(fips, Age.at.Dignosis))
 # create color palettes
 #yodPalette <- colorNumeric(palette = "Oranges", domain=polis_county_summary$YearOfDiagnosis)
 agePalette <- colorNumeric(palette = "Reds", domain=polis_county_summary$age)
@@ -169,6 +170,20 @@ cumulative_plot = function(cv_aggregated, plot_date) {
     theme(legend.title = element_blank(), legend.position = "", plot.title = element_text(size=10), 
           plot.margin = margin(5, 12, 5, 5))
   g1
+}
+
+
+polis_age_plot = function(polis_age) {
+  label <- "Age Distribution"
+  county_name <- unique(polis_age$NAME)
+  if(length(county_name) == 1) {
+    label <- paste(label, ":", county_name, "County")
+  }
+  age_distribution <- ggplot(polis_age, 
+                             aes(x = `Age.at.Dignosis`)) + 
+    geom_density(na.rm = TRUE, fill = "indianred3") +
+    labs(title = label, x = "Age", y = "Proportion")
+  age_distribution
 }
 
 # function to plot new COVID cases by date
@@ -448,6 +463,7 @@ leaflet(polis_county_summary) %>%
                 color = "#666",
                 dashArray = "",
                 bringToFront = TRUE),
+              layerId = polis_county_summary$ALAND,
               label = labels,
               labelOptions = labelOptions(
                 style = list("font-weight" = "normal", padding = "3px 8px"),
@@ -468,6 +484,7 @@ leaflet(polis_county_summary) %>%
                 dashArray = "",
                 bringToFront = TRUE),
               label = labels_death,
+              layerId = polis_county_summary$ALAND,
               labelOptions = labelOptions(
                 style = list("font-weight" = "normal", padding = "3px 8px"),
                 textsize = "15px",
@@ -605,9 +622,9 @@ ui <- bootstrapPage(
                           tags$head(includeCSS("styles.css")),
                           leafletOutput("polis", width="100%", height="100%"),
                           absolutePanel(id = "controls", class = "panel panel-default",
-                                        bottom = 40, left = 20, width = 250, fixed=TRUE,
+                                        bottom = 40, left = 20, width = 350, fixed=TRUE,
                                         position = "bottomleft", draggable = FALSE, height = "auto",
-                                        plotOutput("cumulative_plot", height="130px", width="100%"),
+                                        plotOutput("polis_age_plot", height="200px", width="100%"),
                             sliderInput("year_range",
                                         "Diagnosis Year Range:",
                                         min = as.numeric(min(polis_county_summary$minYearDiag)),
@@ -623,46 +640,68 @@ ui <- bootstrapPage(
                       )
              ),
 
+             tabPanel("Patient-level Maps",
+                      div(class="outer",
+                          tags$head(includeCSS("styles.css")),
+                          leafletOutput("patient", width="100%", height="100%"),
+                          absolutePanel(id = "controls", class = "panel panel-default",
+                                        bottom = 40, left = 20, width = 350, fixed=TRUE,
+                                        position = "bottomleft", draggable = FALSE, height = "auto",
+                                        plotOutput("patient_age_plot", height="200px", width="100%"),
+                                        sliderInput("patient_year_range",
+                                                    "Patient Age Range:",
+                                                    min = as.numeric(min(polis_county_summary$minYearDiag)),
+                                                    max = as.numeric(max(polis_county_summary$maxYearDiag)),
+                                                    value=(c(min(polis_county_summary$minYearDiag), as.numeric(max(polis_county_summary$maxYearDiag)))),
+                                                    step = 1,
+                                        )
+                          ),
+                          #verbatimTextOutput("county_table"),
+                          absolutePanel(id = "logo", class = "card", bottom = 20, left = 60, fixed=TRUE, draggable = FALSE, height = "auto",
+                                        tags$a(href='https://www.iu.edu', tags$img(src='IU.H_WEB.png',height="10%",width="10%"))),
+                          
+                      )
+             ),
              # tabPanel("Region plots",
-             #          
+             # 
              #          sidebarLayout(
              #            sidebarPanel(
-             #              
+             # 
              #              span(tags$i(h6("Reported cases are subject to significant variation in testing policy and capacity between countries.")), style="color:#045a8d"),
              #              span(tags$i(h6("Occasional anomalies (e.g. spikes in daily case counts) are generally caused by changes in case definitions.")), style="color:#045a8d"),
-             #              
-             #              pickerInput("level_select", "Level:",   
-             #                          choices = c("Global", "Continent", "Country", "US state"), 
+             # 
+             #              pickerInput("level_select", "Level:",
+             #                          choices = c("Global", "Continent", "Country", "US state"),
              #                          selected = c("Country"),
              #                          multiple = FALSE),
-             #              
-             #              pickerInput("region_select", "Country/Region:",   
-             #                          choices = as.character(cv_today_reduced[order(-cv_today_reduced$cases),]$country), 
+             # 
+             #              pickerInput("region_select", "Country/Region:",
+             #                          choices = as.character(cv_today_reduced[order(-cv_today_reduced$cases),]$country),
              #                          options = list(`actions-box` = TRUE, `none-selected-text` = "Please make a selection!"),
              #                          selected = as.character(cv_today_reduced[order(-cv_today_reduced$cases),]$country)[1:10],
-             #                          multiple = TRUE), 
-             #              
-             #              pickerInput("outcome_select", "Outcome:",   
-             #                          choices = c("Deaths per million", "Cases per million", "Cases (total)", "Deaths (total)"), 
+             #                          multiple = TRUE),
+             # 
+             #              pickerInput("outcome_select", "Outcome:",
+             #                          choices = c("Deaths per million", "Cases per million", "Cases (total)", "Deaths (total)"),
              #                          selected = c("Deaths per million"),
              #                          multiple = FALSE),
-             #              
-             #              pickerInput("start_date", "Plotting start date:",   
-             #                          choices = c("Date", "Week of 100th confirmed case", "Week of 10th death"), 
+             # 
+             #              pickerInput("start_date", "Plotting start date:",
+             #                          choices = c("Date", "Week of 100th confirmed case", "Week of 10th death"),
              #                          options = list(`actions-box` = TRUE),
              #                          selected = "Date",
-             #                          multiple = FALSE), 
-             #              
+             #                          multiple = FALSE),
+             # 
              #              sliderInput("minimum_date",
              #                          "Minimum date:",
              #                          min = as.Date(cv_min_date,"%Y-%m-%d"),
              #                          max = as.Date(current_date,"%Y-%m-%d"),
              #                          value=as.Date(cv_min_date),
              #                          timeFormat="%d %b"),
-             #              
+             # 
              #              "Select outcome, regions, and plotting start date from drop-down menues to update plots. Countries with at least 1000 confirmed cases are included."
              #            ),
-             #            
+             # 
              #            mainPanel(
              #              tabsetPanel(
              #                tabPanel("Cumulative", plotlyOutput("country_plot_cumulative")),
@@ -672,7 +711,7 @@ ui <- bootstrapPage(
              #            )
              #          )
              # ),
-             
+
 
              tabPanel("Data",
                       numericInput("maxrows", "Rows to show", 25),
@@ -723,12 +762,24 @@ server = function(input, output, session) {
                 minYearDiag = min(YearOfDiagnosis),
                 maxYearDiag = max(YearOfDiagnosis),
                 death_count = sum(Vital.Status==0),
-                death_rate = sum(Vital.Status==0)/total_count)
+                death_rate = sum(Vital.Status==0)/total_count, .groups = 'keep')
     
-    polis_county_summary <- st_as_sf(polis_county_summary %>% left_join(counties))
+    polis_county_summary <- st_as_sf(polis_county_summary %>% left_join(counties, by = 'fips'))
     polis_county_summary <- sf::st_transform(polis_county_summary, "+proj=longlat +datum=WGS84")
     polis_county_summary
     })
+  
+  polis_age_reactive = reactive({
+    county_id <- input$polis_shape_click$id
+    polis_age <- mm_polis_raw %>% 
+      filter(between(YearOfDiagnosis, input$year_range[1], input$year_range[2])) %>% 
+      filter(Age.at.Dignosis <=150) %>% 
+      select(c(fips, Age.at.Dignosis)) %>% left_join(counties, by = 'fips')
+    if(!(is.null(county_id))) {
+      polis_age <- polis_age %>% filter(ALAND == county_id)
+    } 
+    polis_age
+  })
   
   reactive_db_last7d = reactive({
     cv_cases %>% filter(date == formatted_date() & new_cases>0)
@@ -805,7 +856,7 @@ server = function(input, output, session) {
   
   observeEvent(input$year_range, {
     filtered_polis_county_summary = polis_county_summary_reactive_db()
-    labels <- sprintf("<strong>%s</strong><br/>Average age: %g years,<br/> Count: %g",
+    labels <- sprintf("<strong>%s</strong><br/>Average age: %g years,<br/> # of subjects: %g",
                       filtered_polis_county_summary$NAME, filtered_polis_county_summary$age, filtered_polis_county_summary$total_count) %>% lapply(htmltools::HTML)
     labels_death <- sprintf(
       "<strong>%s</strong><br/>Death rate: %g,<br/> # of deaths: %g,<br/> # of subjects: %g", 
@@ -834,6 +885,7 @@ server = function(input, output, session) {
                     dashArray = "",
                     bringToFront = TRUE),
                   label = labels,
+                  layerId = filtered_polis_county_summary$ALAND,
                   labelOptions = labelOptions(
                     style = list("font-weight" = "normal", padding = "3px 8px"),
                     textsize = "15px",
@@ -853,11 +905,17 @@ server = function(input, output, session) {
                     dashArray = "",
                     bringToFront = TRUE),
                   label = labels_death,
+                  layerId = filtered_polis_county_summary$ALAND,
                   labelOptions = labelOptions(
                     style = list("font-weight" = "normal", padding = "3px 8px"),
                     textsize = "15px",
                     direction = "auto")
       )
+  })
+  
+  observeEvent(input$polis_click, {
+    data <- reactiveValues(clickedMarker=NULL)
+    data$clickedMarker <- NULL
   })
   
   output$cumulative_plot <- renderPlot({
@@ -868,6 +926,10 @@ server = function(input, output, session) {
     new_cases_plot(cv_aggregated, formatted_date())
   })
 
+  output$polis_age_plot <- renderPlot({
+    polis_age_plot(polis_age_reactive())
+  })
+  
   # add footnote for cases
   output$epi_notes_1 <- renderText({
     if(input$comparison_metric=="cases") { paste0("Note that the axis is on a log10 scale so moves in 10-fold increments.
