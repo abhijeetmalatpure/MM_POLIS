@@ -31,6 +31,9 @@ if(!require(shinydashboard)) install.packages("shinydashboard", repos = "http://
 if(!require(shinythemes)) install.packages("shinythemes", repos = "http://cran.us.r-project.org")
 if(!require(sf)) install.packages("sf", repos = "http://cran.us.r-project.org")
 if(!require(reticulate)) install.packages("reticulate", repos = "https://cloud.r-project.org/")
+if(!require(survival)) install.packages("survival", repos = "https://cloud.r-project.org/")
+if(!require(survminer)) install.packages("survminer", repos = "https://cloud.r-project.org/")
+if(!require(ggthemes)) install.packages("gthemes", repos = "https://cloud.r-project.org/")
 
 # set mapping colour for each outbreak
 covid_col = "#cc4c02"
@@ -86,18 +89,10 @@ if(!file.exists(data_mm_polis)) {
   source_python("clean_polis_data.py")
 }
 
-# Read Polis data, merge with counties 
-# polis_dtypes = c("numeric","date","date","numeric","numeric","text","text","numeric","numeric",
-#                  "numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric",
-#                  "numeric","numeric","numeric","numeric","numeric","numeric","text","numeric",
-#                  "text","numeric","numeric","numeric","date","numeric","text","numeric","numeric",
-#                  "numeric","numeric","numeric","numeric","numeric","numeric","numeric","date",
-#                  "numeric","numeric","text","numeric","numeric","numeric","numeric","text","text",
-#                  "numeric","numeric","text","text")
-# mm_polis = read_excel(data_mm_polis, sheet = "DataFile_MultipleMyeloma") %>% 
-#   dplyr::rename('fips' = 'County FIPS at Diagnosis')
-
-mm_polis_raw <- as.data.frame(read.csv(data_mm_polis, header = TRUE, sep = ",")) %>% dplyr::rename('fips' = 'County.FIPS.at.Diagnosis')
+# Read the polis data, rename fips column, set age = NA for age = 999
+mm_polis_raw <- as.data.frame(read.csv(data_mm_polis, header = TRUE, sep = ",")) %>% 
+  dplyr::rename('fips' = 'County.FIPS.at.Diagnosis') %>% 
+  filter(Age.at.Dignosis != 999)
 
 polis_county_summary <- mm_polis_raw %>% group_by(fips) %>% summarise(age = round(mean(Age.at.Dignosis), 1), 
                                                           total_count = n(),
@@ -110,6 +105,18 @@ polis_county_summary <- st_as_sf(polis_county_summary %>% left_join(counties, by
 polis_county_summary <- sf::st_transform(polis_county_summary, "+proj=longlat +datum=WGS84")
 
 polis_age <- mm_polis_raw %>% select(c(fips, Age.at.Dignosis))
+
+polis_diagnosis <- mm_polis_raw %>% select(c(fips, Diagnostic.confirmation))
+
+
+polis_patient_info <- mm_polis_raw %>% 
+  select(c(fips, Age.at.Dignosis, Diagnostic.confirmation, Race1, Postal.code.at.diagnosis)) %>% 
+  left_join(counties, by = 'fips')
+
+
+# Mapping between codes and description
+#mapping <- data.frame(sex = c("Male", "Female"))
+
 # create color palettes
 #yodPalette <- colorNumeric(palette = "Oranges", domain=polis_county_summary$YearOfDiagnosis)
 agePalette <- colorNumeric(palette = "Reds", domain=polis_county_summary$age)
@@ -174,17 +181,37 @@ cumulative_plot = function(cv_aggregated, plot_date) {
 
 
 polis_age_plot = function(polis_age) {
-  label <- "Age Distribution"
+  label <- "Age Distribution:"
   county_name <- unique(polis_age$NAME)
   if(length(county_name) == 1) {
-    label <- paste(label, ":", county_name, "County")
+    label <- paste(label, county_name, "County")
   }
+  else
+    label <- paste(label, "Indiana")
+  
   age_distribution <- ggplot(polis_age, 
                              aes(x = `Age.at.Dignosis`)) + 
     geom_density(na.rm = TRUE, fill = "indianred3") +
-    labs(title = label, x = "Age", y = "Proportion")
+    labs(title = label, x = "Age", y = "Proportion") 
   age_distribution
 }
+
+polis_diagnosis_plot = function(polis_diagnosis) {
+  label <- "Diagnosis Counts:"
+  county_name <- unique(polis_diagnosis$NAME)
+  if(length(county_name) == 1) {
+    label <- paste(label, county_name, "County")
+  }
+  else
+    label <- paste(label, "Indiana")
+  
+  diagnosis_distribution <- ggplot(polis_diagnosis, 
+                             aes(x = factor(Diagnostic.confirmation))) + 
+    geom_bar(position="dodge", na.rm = TRUE, fill = "Blue") +
+    labs(title = label, x = "Diagnosis", y = "Count") 
+  diagnosis_distribution
+}
+
 
 # function to plot new COVID cases by date
 new_cases_plot = function(cv_aggregated, plot_date) {
@@ -257,6 +284,13 @@ country_cases_cumulative = function(cv_cases, start_point=c("Date", "Week of 100
     scale_colour_manual(values=country_cols) +
     theme(legend.title = element_blank(), legend.position = "", plot.title = element_text(size=10))
   ggplotly(g1, tooltip = c("text")) %>% layout(legend = list(font = list(size=11)))
+}
+
+
+polis_survival_curve <- function(polis_survival, independent) {
+  independent = ifelse(is.null(independent), 1, independent)
+  fit <- survfit(as.formula(paste('Surv(survival_days, Vital.Status) ~', independent)), data = polis_survival)
+  ggsurvplot(fit, data = polis_survival, pval = TRUE)
 }
 
 # function to plot cumulative cases by region on log10 scale
@@ -458,6 +492,7 @@ leaflet(polis_county_summary) %>%
               dashArray = "1",
               group = "Age",
               weight = 1,
+              popup = polis_county_summary$NAME,
               highlight = highlightOptions(
                 weight = 2,
                 color = "#666",
@@ -478,6 +513,7 @@ leaflet(polis_county_summary) %>%
               dashArray = "1",
               group = "Death Rate",
               weight = 1,
+              popup = polis_county_summary$NAME,
               highlight = highlightOptions(
                 weight = 2,
                 color = "#666",
@@ -513,41 +549,60 @@ leaflet(polis_county_summary) %>%
   #     this.on('baselayerchange', el => updateLegend());
   #   }")
 
-  # addPolygons(stroke=FALSE,
+patientmap =
+  leaflet(polis_county_summary) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  setView(lng = -86.12, lat = 40.27, zoom = 6.5) #%>%
+  
+  # addPolygons(stroke=TRUE,
   #             smoothFactor = 0.2,
-  #             fillOpacity = .8,
-  #             popup = diagpopup,
-  #             color = ~diagPalette(polis_county_summary$Diagnostic.confirmation),
-  #             group = "Diagnostic confirmation"
+  #             fillOpacity = .7,
+  #             fillColor = ~agePalette(polis_county_summary$age),
+  #             color = "white",
+  #             dashArray = "1",
+  #             group = "Age",
+  #             weight = 1,
+  #             highlight = highlightOptions(
+  #               weight = 2,
+  #               color = "#666",
+  #               dashArray = "",
+  #               bringToFront = TRUE),
+  #             layerId = polis_county_summary$ALAND,
+  #             label = labels,
+  #             labelOptions = labelOptions(
+  #               style = list("font-weight" = "normal", padding = "3px 8px"),
+  #               textsize = "15px",
+  #               direction = "auto")
   # ) %>%
-  # 
-  # addPolygons(stroke=FALSE,
+  # addPolygons(stroke=TRUE,
   #             smoothFactor = 0.2,
-  #             fillOpacity = .8,
-  #             popup = chempopup,
-  #             color = ~chemPalette(polis_county_summary$Chemotherapy),
-  #             group = "Chemotherapy"
+  #             fillOpacity = .7,
+  #             fillColor = ~drPalette(polis_county_summary$death_rate),
+  #             color = "white",
+  #             dashArray = "1",
+  #             group = "Death Rate",
+  #             weight = 1,
+  #             highlight = highlightOptions(
+  #               weight = 2,
+  #               color = "#666",
+  #               dashArray = "",
+  #               bringToFront = TRUE),
+  #             label = labels_death,
+  #             layerId = polis_county_summary$ALAND,
+  #             labelOptions = labelOptions(
+  #               style = list("font-weight" = "normal", padding = "3px 8px"),
+  #               textsize = "15px",
+  #               direction = "auto")
   # ) %>%
-  # 
-  # addPolygons(stroke=FALSE,
-  #             smoothFactor = 0.2,
-  #             fillOpacity = .8,
-  #             popup = yodpopup,
-  #             color = ~yodPalette(polis_county_summary$YearOfDiagnosis),
-  #             group = "Year of Diagnosis"
-  # ) %>%
-
   # addLayersControl(
+  #   baseGroups = c("Age", "Death Rate"),
   #   position = "bottomright",
-  #   baseGroups=c("Age", "Diagnostic confirmation", "Chemotherapy", "Year of Diagnosis"),
   #   options = layersControlOptions(collapsed = FALSE)
   # ) %>%
-  # 
-  # sliderInput(inputId = "num", label = "Pick a number", 
-  #             min = min(polis_county_summary$YearOfDiagnosis), 
-  #             max = max(polis_county_summary$YearOfDiagnosis), step = 1, value = c(min(polis_county_summary$YearOfDiagnosis)+min(polis_county_summary$YearOfDiagnosis)/4, 
-  #                                                                      min(polis_county_summary$YearOfDiagnosis)+min(polis_county_summary$YearOfDiagnosis)*3/4))
-
+  # addLegend("bottomright", pal = agePalette, values = ~polis_county_summary$age, group = "Age",
+  #           title = "<small>Average Age<br/></small>") %>%
+  # addLegend("bottomright", pal = drPalette, values = ~polis_county_summary$death_rate, group = "DeathRate",
+  #           title = "<small>Death Rate</small>") #%>%
 
 # sum cv case counts by date
 cv_aggregated = aggregate(cv_cases$cases, by=list(Category=cv_cases$date), FUN=sum)
@@ -617,6 +672,80 @@ ui <- bootstrapPage(
              #          )
              # ),
              
+             tabPanel("Survival Analysis",
+
+                      sidebarLayout(
+                        sidebarPanel(
+
+                          # span(tags$i(h6("Reported cases are subject to significant variation in testing policy and capacity between countries.")), style="color:#045a8d"),
+                          # span(tags$i(h6("Occasional anomalies (e.g. spikes in daily case counts) are generally caused by changes in case definitions.")), style="color:#045a8d"),
+                          span(tags$i(h5("Select values from filters below:")), style="color:#045a8d"),
+                          
+                          sliderInput("km_age_group",
+                                      "Age Group:",
+                                      min = as.numeric(min(polis_survival$Age.at.Dignosis)),
+                                      max = max(as.numeric(polis_survival[polis_survival$Age.at.Dignosis<999,"Age.at.Dignosis"])),
+                                      value=(c(min(polis_survival$Age.at.Dignosis), max(as.numeric(polis_survival[polis_survival$Age.at.Dignosis<999,"Age.at.Dignosis"])))),
+                                      step = 1,
+                          ),
+                          pickerInput("km_sex", "Gender:",
+                                      choices = sort(unique(polis_survival$Sex)),
+                                      options = list(`actions-box` = TRUE),
+                                      multiple = TRUE),
+
+                          pickerInput("km_primary_site", "Primary Site:",
+                                      options = list(`actions-box` = TRUE),
+                                      choices = sort(unique(polis_survival$Primary.Site)),
+                                      multiple = TRUE),
+                          
+                          pickerInput("km_histology", "Histology TypeICDO2:",
+                                      options = list(`actions-box` = TRUE),
+                                      choices = sort(unique(polis_survival$Histology.TypeICDO2)),
+                                      multiple = TRUE),
+                          
+                          pickerInput("km_chemotherapy", "Chemotherapy:",
+                                      options = list(`actions-box` = TRUE),
+                                      choices = sort(unique(polis_survival$Chemotherapy)),
+                                      multiple = TRUE),
+                          
+                          pickerInput("km_immunotherapy", "Immunotherapy:",
+                                      options = list(`actions-box` = TRUE),
+                                      choices = sort(unique(polis_survival$Immunotherapy.BRM)),
+                                      multiple = TRUE),
+
+                          pickerInput("km_othertrt", "Other Treatment:",
+                                      options = list(`actions-box` = TRUE),
+                                      choices = sort(unique(polis_survival$Other.treatment)),
+                                      multiple = TRUE),
+                          
+                          pickerInput("km_clinical_stage", "Stage by Clinical-stage:",
+                                      options = list(`actions-box` = TRUE),
+                                      choices = sort(unique(polis_survival$Stage.by..clinical.stage.)),
+                                      multiple = TRUE),
+                          
+                          pickerInput("km_seer_1977", "SEER Summary Stage 1977:",
+                                      options = list(`actions-box` = TRUE),
+                                      choices = sort(unique(polis_survival$SEER.Summary.Stage.1977)),
+                                      multiple = TRUE),
+                          
+                          pickerInput("km_seer_2000", "SEER Summary Stage 2000:",
+                                      options = list(`actions-box` = TRUE),
+                                      choices = sort(unique(polis_survival$SEER.Summary.Stage.2000)),
+                                      multiple = TRUE),
+                        ),
+
+                        mainPanel(
+                          tabsetPanel(
+                            tabPanel("KM Survival Curve", 
+                                     fluidRow(br(), radioGroupButtons("independent", choiceNames = c("Immunotherapy", "Sex", "Chemotherapy"),
+                                                           choiceValues = c("Immunotherapy.BRM", "Sex", "Chemotherapy")), align = "center"),
+                                     fluidRow(plotOutput("polis_survival_plot"))),
+                            tabPanel("Cumulative (log10)", plotlyOutput("country_plot_cumulative_log"))
+                          )
+                        )
+                      )
+             ),
+             
              tabPanel("County-level Maps",
                       div(class="outer",
                           tags$head(includeCSS("styles.css")),
@@ -624,6 +753,7 @@ ui <- bootstrapPage(
                           absolutePanel(id = "controls", class = "panel panel-default",
                                         bottom = 40, left = 20, width = 350, fixed=TRUE,
                                         position = "bottomleft", draggable = FALSE, height = "auto",
+                                        plotOutput("polis_diagnosis_plot", height="200px", width="100%"),
                                         plotOutput("polis_age_plot", height="200px", width="100%"),
                             sliderInput("year_range",
                                         "Diagnosis Year Range:",
@@ -640,28 +770,28 @@ ui <- bootstrapPage(
                       )
              ),
 
-             tabPanel("Patient-level Maps",
-                      div(class="outer",
-                          tags$head(includeCSS("styles.css")),
-                          leafletOutput("patient", width="100%", height="100%"),
-                          absolutePanel(id = "controls", class = "panel panel-default",
-                                        bottom = 40, left = 20, width = 350, fixed=TRUE,
-                                        position = "bottomleft", draggable = FALSE, height = "auto",
-                                        plotOutput("patient_age_plot", height="200px", width="100%"),
-                                        sliderInput("patient_year_range",
-                                                    "Patient Age Range:",
-                                                    min = as.numeric(min(polis_county_summary$minYearDiag)),
-                                                    max = as.numeric(max(polis_county_summary$maxYearDiag)),
-                                                    value=(c(min(polis_county_summary$minYearDiag), as.numeric(max(polis_county_summary$maxYearDiag)))),
-                                                    step = 1,
-                                        )
-                          ),
-                          #verbatimTextOutput("county_table"),
-                          absolutePanel(id = "logo", class = "card", bottom = 20, left = 60, fixed=TRUE, draggable = FALSE, height = "auto",
-                                        tags$a(href='https://www.iu.edu', tags$img(src='IU.H_WEB.png',height="10%",width="10%"))),
-                          
-                      )
-             ),
+             # tabPanel("Patient-level Maps",
+             #          div(class="outer",
+             #              tags$head(includeCSS("styles.css")),
+             #              leafletOutput("patient", width="100%", height="100%"),
+             #              absolutePanel(id = "controls", class = "panel panel-default",
+             #                            bottom = 40, left = 20, width = 350, fixed=TRUE,
+             #                            position = "bottomleft", draggable = FALSE, height = "auto",
+             #                            plotOutput("patient_age_plot", height="200px", width="100%"),
+             #                            sliderInput("patient_year_range",
+             #                                        "Patient Age Range:",
+             #                                        min = as.numeric(min(polis_patient_info$Age.at.Dignosis)),
+             #                                        max = as.numeric(max(polis_patient_info$Age.at.Dignosis)),
+             #                                        value=(c(min(polis_county_summary$minYearDiag), as.numeric(max(polis_county_summary$maxYearDiag)))),
+             #                                        step = 1,
+             #                            )
+             #              ),
+             #              #verbatimTextOutput("county_table"),
+             #              absolutePanel(id = "logo", class = "card", bottom = 20, left = 60, fixed=TRUE, draggable = FALSE, height = "auto",
+             #                            tags$a(href='https://www.iu.edu', tags$img(src='IU.H_WEB.png',height="10%",width="10%"))),
+             #              
+             #          )
+             # ),
              # tabPanel("Region plots",
              # 
              #          sidebarLayout(
@@ -722,9 +852,8 @@ ui <- bootstrapPage(
              ),
              
              tabPanel("About this site",
-                      tags$div(
-                        "This is a site to display Multiple Myeloma data from the IUPUI Polis Center. Version 0.1"
-                      ),
+                      span(tags$i(h5("This is a site to display Multiple Myeloma data from the IUPUI Polis Center. Version 0.1. Please see the file below for metadata")), style="color:#045a8d"),
+                      uiOutput("metadata"),
                       absolutePanel(id = "logo", class = "card", bottom = 20, left = 60, fixed=TRUE, draggable = FALSE, height = "auto",
                                     tags$a(href='https://www.iu.edu', tags$img(src='IU.H_WEB.png',height="10%",width="10%")))
              )
@@ -781,6 +910,71 @@ server = function(input, output, session) {
     polis_age
   })
   
+  polis_diagnosis_reactive = reactive({
+    county_id <- input$polis_shape_click$id
+    polis_diagnosis <- mm_polis_raw %>% 
+      filter(between(YearOfDiagnosis, input$year_range[1], input$year_range[2])) %>% 
+      select(c(fips, Diagnostic.confirmation)) %>% left_join(counties, by = 'fips')
+    if(!(is.null(county_id))) {
+      polis_diagnosis <- polis_diagnosis %>% filter(ALAND == county_id)
+    } 
+    polis_diagnosis
+  })
+  
+  polis_survival_independent = reactive({
+    input$independent
+  })
+  
+  polis_survival_reactive = reactive({
+    polis_survival <- mm_polis_raw %>% 
+      select(c(Date.of.Diagnosis, Date.of.last.contact, Age.at.Dignosis, Sex, Primary.Site, Histology.TypeICDO2, Chemotherapy, 
+               Immunotherapy.BRM, Other.treatment, Stage.by..clinical.stage., SEER.Summary.Stage.1977,
+               SEER.Summary.Stage.2000, Vital.Status))
+    polis_survival$survival_days <- (as.Date(polis_survival$Date.of.last.contact)-as.Date(polis_survival$Date.of.Diagnosis)) /365.25
+
+    filt_sex <- input$km_sex
+    if(!is.null(filt_sex)) {
+      polis_survival <- polis_survival %>% dplyr::filter(Sex == filt_sex)
+    }
+    filt_agegroup <- input$km_age_group
+    if(!is.null(filt_agegroup)) {
+      polis_survival <- polis_survival %>% dplyr::filter(between(Age.at.Dignosis, filt_agegroup[1], filt_agegroup[2]))
+    }
+    filt_primary_site <- input$km_primary_site
+    if(!is.null(filt_primary_site)) {
+      polis_survival <- polis_survival %>% dplyr::filter(Primary.Site %in% filt_primary_site)
+    }
+    filt_histology <- input$km_histology
+    if(!is.null(filt_histology)) {
+      polis_survival <- polis_survival %>% dplyr::filter(Histology.TypeICDO2 %in% filt_histology)
+    }
+    filt_chemotherapy <- input$km_chemotherapy
+    if(!is.null(filt_chemotherapy)) {
+      polis_survival <- polis_survival %>% dplyr::filter(Chemotherapy %in% filt_chemotherapy)
+    }
+    filt_immunotherapy <- input$km_immunotherapy
+    if(!is.null(filt_immunotherapy)) {
+      polis_survival <- polis_survival %>% dplyr::filter(Immunotherapy.BRM %in% filt_immunotherapy)
+    }
+    filt_othertrt <- input$km_othertrt
+    if(!is.null(filt_othertrt)) {
+      polis_survival <- polis_survival %>% dplyr::filter(Other.treatment %in% filt_othertrt)
+    }
+    filt_clinical_stage <- input$km_clinical_stage
+    if(!is.null(filt_clinical_stage)) {
+      polis_survival <- polis_survival %>% dplyr::filter(Stage.by..clinical.stage. %in% filt_clinical_stage)
+    }
+    filt_seer_1977 <- input$km_seer_1977
+    if(!is.null(filt_seer_1977)) {
+      polis_survival <- polis_survival %>% dplyr::filter(Chemotherapy %in% filt_seer_1977)
+    }
+    filt_seer_2000 <- input$km_seer_2000
+    if(!is.null(filt_seer_2000)) {
+      polis_survival <- polis_survival %>% dplyr::filter(Chemotherapy %in% filt_seer_2000)
+    }
+    polis_survival
+  })
+  
   reactive_db_last7d = reactive({
     cv_cases %>% filter(date == formatted_date() & new_cases>0)
   })
@@ -831,6 +1025,10 @@ server = function(input, output, session) {
     polismap
   })
   
+  output$patient <- renderLeaflet({ 
+    patientmap
+  })
+  
   observeEvent(input$plot_date, {
     leafletProxy("mymap") %>% 
       clearMarkers() %>%
@@ -878,7 +1076,8 @@ server = function(input, output, session) {
                   color = "white",
                   dashArray = "1",
                   group = "Age",
-                  weight = 1,
+                  weight = 1,              
+                  popup = filtered_polis_county_summary$NAME,
                   highlight = highlightOptions(
                     weight = 2,
                     color = "#666",
@@ -899,6 +1098,7 @@ server = function(input, output, session) {
                   dashArray = "1",
                   group = "Death Rate",
                   weight = 1,
+                  popup = filtered_polis_county_summary$NAME,
                   highlight = highlightOptions(
                     weight = 2,
                     color = "#666",
@@ -928,6 +1128,10 @@ server = function(input, output, session) {
 
   output$polis_age_plot <- renderPlot({
     polis_age_plot(polis_age_reactive())
+  })
+  
+  output$polis_diagnosis_plot <- renderPlot({
+    polis_diagnosis_plot(polis_diagnosis_reactive())
   })
   
   # add footnote for cases
@@ -1028,6 +1232,11 @@ server = function(input, output, session) {
     country_cases_cumulative(country_reactive_db(), start_point=input$start_date, input$minimum_date)
   })
   
+  output$polis_survival_plot <- renderPlot({
+    independent <- input$independent
+    polis_survival_curve(polis_survival_reactive(), independent)
+  })
+  
   # country-specific plots
   output$country_plot_cumulative_log <- renderPlotly({
     country_cases_cumulative_log(country_reactive_db(), start_point=input$start_date, input$minimum_date)
@@ -1042,6 +1251,14 @@ server = function(input, output, session) {
       write.csv(mm_polis_raw, file, row.names = FALSE)
     }
   )
+  
+  output$metadata <- renderUI({
+    addResourcePath("resources", "input_data/")
+    tags$iframe(
+      seamless="seamless",
+      src="resources/2018PolicyandProcedureManual.pdf",
+      style="height:550px; width:100%; border:0; scrolling:yes")
+  })
   
   output$rawtable <- renderPrint({
     orig <- options(width = 1000)
