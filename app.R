@@ -30,10 +30,10 @@ if(!require(shinyWidgets)) install.packages("shinyWidgets", repos = "http://cran
 if(!require(shinydashboard)) install.packages("shinydashboard", repos = "http://cran.us.r-project.org")
 if(!require(shinythemes)) install.packages("shinythemes", repos = "http://cran.us.r-project.org")
 if(!require(sf)) install.packages("sf", repos = "http://cran.us.r-project.org")
-if(!require(reticulate)) install.packages("reticulate", repos = "https://cloud.r-project.org/")
-if(!require(survival)) install.packages("survival", repos = "https://cloud.r-project.org/")
-if(!require(survminer)) install.packages("survminer", repos = "https://cloud.r-project.org/")
-if(!require(ggthemes)) install.packages("gthemes", repos = "https://cloud.r-project.org/")
+if(!require(reticulate)) install.packages("reticulate", repos = "http://cran.us.r-project.org")
+if(!require(survival)) install.packages("survival", repos = "http://cran.us.r-project.org")
+if(!require(survminer)) install.packages("survminer", repos = "http://cran.us.r-project.org")
+if(!require(ggthemes)) install.packages("gthemes", repos = "http://cran.us.r-project.org")
 
 # set mapping colour for each outbreak
 covid_col = "#cc4c02"
@@ -113,6 +113,13 @@ polis_patient_info <- mm_polis_raw %>%
   select(c(fips, Age.at.Dignosis, Diagnostic.confirmation, Race1, Postal.code.at.diagnosis)) %>% 
   left_join(counties, by = 'fips')
 
+polis_survival <- mm_polis_raw %>% 
+  select(c(Date.of.Diagnosis, Date.of.last.contact, Age.at.Dignosis, Sex, Primary.Site, Histology.TypeICDO2, Chemotherapy, 
+           Immunotherapy.BRM, Other.treatment, Stage.by..clinical.stage., SEER.Summary.Stage.1977,
+           SEER.Summary.Stage.2000, Vital.Status))
+polis_survival$survival_days <- (as.Date(polis_survival$Date.of.last.contact)-as.Date(polis_survival$Date.of.Diagnosis)) /365.25
+
+independent = "Sex"
 
 # Mapping between codes and description
 #mapping <- data.frame(sex = c("Male", "Female"))
@@ -287,10 +294,9 @@ country_cases_cumulative = function(cv_cases, start_point=c("Date", "Week of 100
 }
 
 
-polis_survival_curve <- function(polis_survival, independent) {
-  independent = ifelse(is.null(independent), 1, independent)
-  fit <- survfit(as.formula(paste('Surv(survival_days, Vital.Status) ~', independent)), data = polis_survival)
-  ggsurvplot(fit, data = polis_survival, pval = TRUE)
+polis_survival_curve <- function(polis_survival, independent=1) {
+  ggsurvplot(survfit(as.formula(paste('Surv(survival_days, Vital.Status) ~', independent)), 
+                     data = polis_survival), data = polis_survival, pval = TRUE)
 }
 
 # function to plot cumulative cases by region on log10 scale
@@ -921,10 +927,6 @@ server = function(input, output, session) {
     polis_diagnosis
   })
   
-  polis_survival_independent = reactive({
-    input$independent
-  })
-  
   polis_survival_reactive = reactive({
     polis_survival <- mm_polis_raw %>% 
       select(c(Date.of.Diagnosis, Date.of.last.contact, Age.at.Dignosis, Sex, Primary.Site, Histology.TypeICDO2, Chemotherapy, 
@@ -1233,8 +1235,7 @@ server = function(input, output, session) {
   })
   
   output$polis_survival_plot <- renderPlot({
-    independent <- input$independent
-    polis_survival_curve(polis_survival_reactive(), independent)
+    polis_survival_curve(polis_survival_reactive(), input$independent)
   })
   
   # country-specific plots
