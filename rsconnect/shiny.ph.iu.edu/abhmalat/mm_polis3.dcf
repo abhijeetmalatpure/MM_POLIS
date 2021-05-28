@@ -1,0 +1,14 @@
+name: mm_polis3
+title: MM_POLIS
+username: abhmalat
+account: abhmalat
+server: shiny.ph.iu.edu
+hostUrl: https://shiny.ph.iu.edu/__api__
+appId: 65
+bundleId: 257
+url: https://shiny.ph.iu.edu/MM_POLIS/
+when: 1621374186.38801
+lastSyncTime: 1621374186.38801
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .gitattributes|.RData|cb_2018_us_county_500k.shp|ISDH Data.lnk|km_survival.R|survival_curve.R|test.R

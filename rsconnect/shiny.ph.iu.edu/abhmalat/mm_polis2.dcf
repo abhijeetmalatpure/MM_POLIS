@@ -1,0 +1,14 @@
+name: mm_polis2
+title: MM_POLIS
+username: abhmalat
+account: abhmalat
+server: shiny.ph.iu.edu
+hostUrl: https://shiny.ph.iu.edu/__api__
+appId: 61
+bundleId: 249
+url: https://shiny.ph.iu.edu/MM_POLIS/
+when: 1620315031.93275
+lastSyncTime: 1620315031.93275
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .gitattributes|archive_30March2020/.Rhistory|archive_30March2020/app.R|archive_30March2020/app_03Sep2020.R|archive_30March2020/jhu_data_full.R|archive_30March2020/jhu_data_update.R|cb_2018_us_county_500k.shp|ISDH Data.lnk|jhu_data_daily_cases.R|jhu_data_weekly_cases.R|km_survival.R|ny_data_us.R|survival_curve.R|test.R|.idea
